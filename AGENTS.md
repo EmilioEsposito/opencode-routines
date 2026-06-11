@@ -345,3 +345,109 @@ var containerURL: URL {
 - [ ] Agents explicitly signal completion
 
 **Ultimate test:** Describe an outcome in your domain that you didn't build a feature for. Can the agent figure it out in a loop until success?
+
+---
+
+# Repo-Specific: Testing opencode-routines
+
+Hard-won verification methods for this repo. OpenCode plugin bugs are often
+silent (plugin installs fine but registers nothing), so **never claim a fix
+works without one of these end-to-end checks.**
+
+## Package layout / loader contracts
+
+- `opencode-routines` (root) is a **server plugin**: loaded from
+  `opencode.json`'s `plugin` array. Module must default-export a function (or
+  `{ server }`). Named non-function exports break the loader — keep test
+  helpers as properties on the default export, never as named exports.
+- `opencode-routines-tui` (`packages/tui/`) is a **TUI plugin**: loaded from
+  `tui.json`'s `plugin` array (NOT `opencode.json`). Module must
+  default-export `{ id, tui }`.
+- For **npm** TUI plugins, OpenCode resolves the entrypoint ONLY from
+  `package.json` `exports["./tui"]`. The `main`/`"."` export fallback applies
+  to server plugins only. Without `./tui`, install succeeds but the plugin is
+  silently skipped ("tui plugin has no entrypoint"). Keep both `"."` and
+  `"./tui"` in `packages/tui/package.json`.
+- Slash commands come from `api.keymap.registerLayer` command entries with a
+  `slashName` field (plus optional `slashAliases`). The legacy
+  `api.command.register` shim with `slash: { name }` also works but warns.
+- Same-session prompt injection must use `session.promptAsync` (NOT
+  `session.prompt`, which streams a nested run and fails under Desktop):
+  - Server plugin client (non-v2 SDK): `{ path: { id: sessionID }, body: { parts } }`
+  - TUI plugin client (v2 SDK): `{ sessionID, parts }`
+
+## 1. TUI slash-command test (tmux)
+
+Raw PTY scripting stalls (the TUI blocks on terminal capability queries), so
+use tmux as the terminal emulator:
+
+```bash
+# point a throwaway tui.json at the LOCAL package dir to test unpublished code
+cat > /tmp/routines-tui-test.json <<'JSON'
+{"$schema":"https://opencode.ai/tui.json","plugin":["/Users/<you>/code/opencode-routines/packages/tui"]}
+JSON
+# or test the published package: "plugin": ["opencode-routines-tui@X.Y.Z"]
+
+tmux kill-session -t octui 2>/dev/null
+tmux new-session -d -s octui -x 160 -y 42 \
+  "env -u OPENCODE_CLIENT -u OPENCODE_DISABLE_EMBEDDED_WEB_UI \
+       -u OPENCODE_SERVER_USERNAME -u OPENCODE_SERVER_PASSWORD -u XDG_STATE_HOME \
+   OPENCODE_TUI_CONFIG=/tmp/routines-tui-test.json opencode /path/to/repo"
+sleep 18   # plugin npm install can take ~15-25s on first run
+tmux send-keys -t octui "/loop"
+sleep 3
+tmux capture-pane -t octui -p | tail -45   # expect /loop /loops /stop-loop rows
+tmux kill-session -t octui
+```
+
+Pass = the slash suggestion list shows the plugin's commands. "No matching
+items" = plugin not loaded (check the `./tui` export and `tui.json` path).
+The `env -u` strips are required when running from inside OpenCode Desktop
+(see opencode-mdm/AGENTS.md in the mdm repo).
+
+## 2. Server plugin test (headless serve + direct API)
+
+Spin an isolated server with the local build, then exercise the prompt
+helper against a real session:
+
+```bash
+env -u OPENCODE_CLIENT -u OPENCODE_DISABLE_EMBEDDED_WEB_UI \
+    -u OPENCODE_SERVER_USERNAME -u OPENCODE_SERVER_PASSWORD -u XDG_STATE_HOME \
+  XDG_STATE_HOME=/tmp/oc-test-state OPENCODE_DISABLE_PROJECT_CONFIG=1 \
+  OPENCODE_CONFIG_CONTENT='{"plugin":["/Users/<you>/code/opencode-routines/dist/index.js"]}' \
+  opencode serve --port 61933 --hostname 127.0.0.1 --log-level DEBUG --print-logs \
+  > /tmp/oc-serve.log 2>&1 &
+
+curl -s -X POST http://127.0.0.1:61933/session -H 'Content-Type: application/json' -d '{}'
+# then call the helper attached to the default export:
+node --input-type=module -e '
+import { createOpencodeClient } from "./node_modules/@opencode-ai/sdk/dist/client.js"
+import RoutinesPlugin from "./dist/index.js"
+const client = createOpencodeClient({ baseUrl: "http://127.0.0.1:61933" })
+await RoutinesPlugin.__test.submitSessionPrompt(client, "<session-id>", "test prompt")
+'
+```
+
+Then grep `/tmp/oc-serve.log` for `failed to load plugin` (must be absent for
+this plugin) and `process session.id=` (proof the injected prompt ran).
+
+## 3. Desktop same-session test
+
+When OpenCode Desktop is running, its sidecar URL is in the Desktop logs
+(`~/Library/Application Support/ai.opencode.desktop/logs/<ts>/main.log`) and
+auth comes from `OPENCODE_SERVER_USERNAME` / `OPENCODE_SERVER_PASSWORD` in the
+inherited env. `POST /session/<id>/prompt_async` with `{parts:[...]}` must
+inject a message into the open session. Timer-callback failures land in the
+same logs dir under `server.log` (plugin stderr).
+
+## Release checklist
+
+1. `npm test && npm run typecheck` (root)
+2. `cd packages/tui && npm run build`
+3. tmux TUI test against the **local** `packages/tui` dir (section 1)
+4. Bump BOTH `package.json` versions in lockstep
+5. Commit/push, then `npm publish` root and `packages/tui` (needs OTP — only
+   Emilio publishes)
+6. Re-run the tmux test against the **published** version
+7. Update pins in the mdm repo: `opencode-mdm/opencode.json` (server plugin)
+   and `opencode-mdm/tui.json` (TUI plugin), run that repo's smoke tests, push
