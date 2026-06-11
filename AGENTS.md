@@ -376,6 +376,25 @@ works without one of these end-to-end checks.**
   - Server plugin client (non-v2 SDK): `{ path: { id: sessionID }, body: { parts } }`
   - TUI plugin client (v2 SDK): `{ sessionID, parts }`
 
+## Managed command files (server plugin side effect)
+
+On load, the server plugin idempotently installs `/loop`, `/loops`,
+`/stop-loop`, and `/schedule-standalone-session` as OpenCode custom command
+files under `$XDG_CONFIG_HOME/opencode/commands/` (default
+`~/.config/opencode/commands/`). Rules:
+
+- Files carry a `managed-by: opencode-routines` marker. Files without the
+  marker are user-owned and must NEVER be overwritten.
+- Writes are staged + `rename` (atomic) and skipped when content is current
+  (no spurious mtime bumps).
+- Disable via plugin options: `["opencode-routines", {"commands": false}]`.
+- Tests and local runs MUST set `XDG_CONFIG_HOME` to a temp dir before
+  importing/initializing the plugin, or you will write into the real user
+  config (see `scripts/validate-routines-surface.mjs`).
+- These commands appear in BOTH terminal TUI and Desktop. Installing the
+  optional `opencode-routines-tui` plugin alongside them duplicates the slash
+  entries in the terminal TUI.
+
 ## 1. TUI slash-command test (tmux)
 
 Raw PTY scripting stalls (the TUI blocks on terminal capability queries), so
