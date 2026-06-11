@@ -1,57 +1,102 @@
 # opencode-routines
 
-Claude-Code-style routines for [opencode](https://opencode.ai): same-session loops, same-session cron prompts, and host-backed standalone scheduled agents.
+[![npm](https://img.shields.io/npm/v/opencode-routines)](https://www.npmjs.com/package/opencode-routines)
+[![npm downloads](https://img.shields.io/npm/dm/opencode-routines)](https://www.npmjs.com/package/opencode-routines)
+[![license](https://img.shields.io/npm/l/opencode-routines)](https://github.com/EmilioEsposito/opencode-routines/blob/main/LICENSE)
+[![GitHub](https://img.shields.io/badge/GitHub-source-black?logo=github)](https://github.com/EmilioEsposito/opencode-routines)
 
-This package is a hard fork / successor of `opencode-scheduler` by Benjamin Shafii. The durable host scheduler implementation is derived from that project; this fork changes the product model around routines and adds Claude-aligned tool names.
+Claude-Code-style routines for [OpenCode](https://opencode.ai): same-session loops, same-session cron prompts, and host-backed standalone scheduled agents.
+
+Use it for things like:
+
+```text
+/loop 5m /babysit-prs
+```
+
+```text
+Create a standalone scheduled run every weekday at 9am to summarize my open PRs
+```
+
+```text
+Create a same-session cron prompt for 17 * * * * to check whether CI is done
+```
 
 ## Install
 
-Server tools only:
+Add the server plugin to your OpenCode config (`~/.config/opencode/opencode.jsonc` or project-level `.opencode/opencode.jsonc`):
 
-```json
+```jsonc
 {
-  "plugin": ["opencode-routines"]
+  "$schema": "https://opencode.ai/config.json",
+  "plugin": ["opencode-routines@latest"]
 }
 ```
 
-Server tools plus optional TUI slash commands:
+OpenCode installs the package from npm on next start. Use `@latest` if you want new versions on restart, or pin a version such as `"opencode-routines@0.1.1"`.
 
-```json
+Optional TUI slash commands live in a second plugin entrypoint from the same npm package:
+
+```jsonc
 {
-  "plugin": ["opencode-routines", "opencode-routines/tui"]
+  "$schema": "https://opencode.ai/config.json",
+  "plugin": ["opencode-routines@latest", "opencode-routines/tui@latest"]
 }
 ```
 
-`opencode-routines/tui` is a subpath export from the same npm package, not a separate package.
+`opencode-routines/tui` is a subpath export, not a second npm package.
 
-## Concepts
+## What it provides
 
-| Concept | Session model | Where it runs | Persistence |
-|---|---|---|---|
-| Loop | Same conversation | Current opencode host/process | Process-scoped |
-| Cron prompt | Same conversation | Current opencode host/process | Session-only for now |
-| Standalone schedule | Fresh standalone opencode run | Host scheduler: launchd/systemd/Task Scheduler/cron | Durable |
+| Capability | Session model | Where it runs | Persistence | Primary tools / commands |
+|---|---|---|---|---|
+| **Loop** | Same conversation | Current OpenCode host/process | Process-scoped | `LoopCreate`, `LoopList`, `LoopDelete`, `ScheduleWakeup`, `/loop` |
+| **Cron prompt** | Same conversation | Current OpenCode host/process | Session-only for now | `CronCreate`, `CronList`, `CronDelete` |
+| **Standalone schedule** | Fresh standalone `opencode run` | Host scheduler: launchd, systemd, Task Scheduler, or cron | Durable | `ScheduleCreate`, `ScheduleList`, `ScheduleDelete`, `ScheduleRun`, `ScheduleLogs` |
 
-The ambiguous `/schedule` slash command is intentionally **not** registered. Use `/schedule-standalone-session` for help with durable standalone schedules, or use the `ScheduleCreate` tool directly.
+The ambiguous `/schedule` slash command is intentionally **not** registered. Use `ScheduleCreate` for durable standalone schedules, or `/schedule-standalone-session` for TUI help.
 
-## Same-session loop tools
+## Same-session loops
 
-| Tool | Description |
-|---|---|
-| `LoopCreate` | Start a same-session loop. Fixed interval when `interval` is provided; dynamic mode otherwise. |
-| `LoopList` | List active loops in this plugin process. |
-| `LoopDelete` | Stop an active loop. |
-| `ScheduleWakeup` | Dynamic-loop wake-up tool. Only works for an active dynamic loop in the same session and prompt. |
+Loops run prompts back into the current conversation.
 
-`ScheduleWakeup` parameters align with Claude Code:
+### Fixed interval loop
+
+```text
+/loop 5m /babysit-prs
+```
+
+Equivalent tool shape:
+
+```json
+{
+  "prompt": "/babysit-prs",
+  "interval": "5m"
+}
+```
+
+### Dynamic loop
+
+Dynamic loops are self-paced. The first prompt fires immediately, then the model can call `ScheduleWakeup` to decide when to resume.
+
+```text
+/loop /babysit-prs
+```
+
+`ScheduleWakeup` parameters:
 
 | Param | Type | Required | Description |
 |---|---|---|---|
 | `delaySeconds` | number | yes | Seconds until wake-up. Clamped to 60-3600. |
-| `prompt` | string | yes | The loop prompt to fire on wake-up. |
+| `prompt` | string | yes | The active loop prompt to fire on wake-up. |
 | `reason` | string | yes | Short explanation for the wake-up. |
 
-## Same-session cron tools
+Omitting `ScheduleWakeup` ends a dynamic loop.
+
+## Same-session cron prompts
+
+Cron prompts enqueue prompts into the current session at wall-clock times. They are not standalone processes and do not run while OpenCode is closed.
+
+Tools:
 
 | Tool | Description |
 |---|---|
@@ -65,48 +110,37 @@ The ambiguous `/schedule` slash command is intentionally **not** registered. Use
 |---|---|---|---|---|
 | `cron` | string | yes | — | 5-field cron in local timezone: `M H DoM Mon DoW`. |
 | `prompt` | string | yes | — | Prompt to enqueue in the same session. |
-| `recurring` | boolean | no | `true` | `false` = one-shot. |
+| `recurring` | boolean | no | `true` | `false` makes a one-shot cron prompt. |
 | `durable` | boolean | no | `false` | Accepted for Claude compatibility, but currently session-only. |
 
-## Durable standalone schedule tools
+## Durable standalone schedules
 
-Claude-aligned aliases:
+Standalone schedules are independent `opencode run` processes launched by the host scheduler. They survive terminal exit and machine restarts according to the host scheduler's behavior.
+
+Claude-aligned tools:
 
 | Tool | Description |
 |---|---|
-| `ScheduleCreate` | Create a durable host-backed standalone scheduled opencode run. |
+| `ScheduleCreate` | Create a durable host-backed standalone scheduled OpenCode run. |
 | `ScheduleList` | List standalone schedules. |
 | `ScheduleDelete` | Delete a standalone schedule. |
 | `ScheduleRun` | Run a standalone schedule immediately. |
 | `ScheduleLogs` | View logs for a standalone schedule. |
 
-Legacy compatibility aliases are still present:
+Legacy compatibility tools from `opencode-scheduler` are still present: `schedule_job`, `list_jobs`, `get_job`, `update_job`, `delete_job`, `run_job`, `job_logs`, and `cleanup_global`.
 
-| Tool | Description |
-|---|---|
-| `schedule_job` | Create a durable standalone schedule. |
-| `list_jobs` | List durable standalone schedules. |
-| `get_job` | Get schedule details. |
-| `update_job` | Update a schedule. |
-| `delete_job` | Delete a schedule. |
-| `run_job` | Run a schedule immediately. |
-| `job_logs` | View schedule logs. |
-| `cleanup_global` | Clean up scheduler artifacts across all scopes. |
-
-Durable standalone schedules use the host scheduler: launchd on macOS, systemd on Linux, Task Scheduler on Windows, or cron fallback. Each run starts a fresh standalone `opencode run` by default. Pass explicit `session`, `continue`, or `attachUrl` only when you intentionally want different behavior.
-
-## Optional TUI commands
+## TUI slash commands
 
 Available when `opencode-routines/tui` is installed:
 
 | Command | Meaning |
 |---|---|
-| `/loop` | Start a same-session live loop. Fixed interval syntax: `5m /babysit-prs`. Dynamic syntax: `/babysit-prs`. |
+| `/loop` | Start a same-session live loop. Fixed interval syntax: `5m /babysit-prs`; dynamic syntax: `/babysit-prs`. |
 | `/loops` | List active loops. Selecting a loop stops it. |
 | `/stop-loop` | Stop an active loop. |
 | `/schedule-standalone-session` | Help entry for durable standalone schedules. |
 
-## Storage
+## Storage and platform support
 
 Standalone schedule storage remains compatible with `opencode-scheduler`:
 
@@ -118,15 +152,51 @@ Standalone schedule storage remains compatible with `opencode-scheduler`:
 | Logs | `~/.config/opencode/logs/scheduler/<scopeId>/*.log` |
 | Supervisor script | `~/.config/opencode/scheduler/supervisor.pl` |
 
+Standalone schedule backends:
+
+| Platform | Backend |
+|---|---|
+| macOS | `launchd` |
+| Linux with systemd | `systemd --user` |
+| Linux / POSIX fallback | `cron` |
+| Windows | Task Scheduler (`schtasks`) |
+
+## Compatibility notes
+
+- OpenCode loads config once at startup. Restart OpenCode after changing plugin configuration.
+- `opencode-routines/tui` requires OpenCode's TUI plugin runtime. If your OpenCode build does not support TUI plugins, install only `opencode-routines`.
+- `CronCreate({ durable: true })` is accepted for Claude Code compatibility but currently behaves as session-only.
+
+## Debugging
+
+- Use `LoopList` and `CronList` for live same-session state.
+- Use `ScheduleList` and `ScheduleLogs` for durable standalone schedules.
+- Standalone run logs live under `~/.config/opencode/logs/scheduler/<scopeId>/`.
+
+## Development
+
+```bash
+npm install
+npm test
+npm run typecheck
+```
+
+For local development, point OpenCode at this repo's built files or source path. Do not load both a local shim and the npm package at the same time, or tools may register twice.
+
 ## Publishing
 
 ```bash
 npm login
+npm test
 npm publish
 ```
 
-Bump `version` in `package.json` before each release.
+The package is public and unscoped. Bump `version` in `package.json` before every publish.
+
+## Credits
+
+`opencode-routines` is a hard fork / successor of [`opencode-scheduler`](https://github.com/different-ai/opencode-scheduler) by Benjamin Shafii. The host-backed standalone scheduling implementation is derived from that project; this fork adds the routines-oriented model, same-session loops, cron prompts, and Claude-aligned tool names.
 
 ## License
 
-MIT
+[MIT](LICENSE)

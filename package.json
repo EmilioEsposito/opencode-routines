@@ -1,12 +1,14 @@
 {
   "name": "opencode-routines",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "OpenCode routines: same-session loops, cron prompts, and host-backed standalone scheduled agents",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "type": "module",
   "files": [
-    "dist"
+    "dist",
+    "README.md",
+    "LICENSE"
   ],
   "exports": {
     ".": {
@@ -30,6 +32,7 @@
   },
   "keywords": [
     "opencode",
+    "opencode-plugin",
     "plugin",
     "routines",
     "scheduler",
