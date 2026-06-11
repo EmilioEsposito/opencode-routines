@@ -1,6 +1,6 @@
 {
   "name": "opencode-routines-tui",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "TUI slash commands for opencode-routines: /loop, /loops, /stop-loop, and /schedule-standalone-session.",
   "main": "dist/tui.js",
   "types": "dist/tui.d.ts",
@@ -12,6 +12,10 @@
   ],
   "exports": {
     ".": {
+      "types": "./dist/tui.d.ts",
+      "import": "./dist/tui.js"
+    },
+    "./tui": {
       "types": "./dist/tui.d.ts",
       "import": "./dist/tui.js"
     }
