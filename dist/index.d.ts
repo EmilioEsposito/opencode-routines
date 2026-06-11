@@ -53,6 +53,12 @@ interface Job {
     lastRunSource?: "manual" | "scheduled";
     lastRunStatus?: "running" | "success" | "failed";
 }
+type RoutinePromptClient = {
+    session?: {
+        prompt?: (input: unknown) => Promise<unknown>;
+    };
+};
+export declare function __testSubmitSessionPrompt(client: RoutinePromptClient, sessionID: string, prompt: string): Promise<void>;
 export declare function __testBuildOpencodeArgs(job: Job): {
     command: string;
     args: string[];

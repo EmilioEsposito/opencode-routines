@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import RoutinesPlugin, { __testBuildOpencodeArgs } from "../dist/index.js"
+import RoutinesPlugin, { __testBuildOpencodeArgs, __testSubmitSessionPrompt } from "../dist/index.js"
 import tuiPlugin from "../dist/tui.js"
 
 const standalone = __testBuildOpencodeArgs({
@@ -24,6 +24,23 @@ const explicit = __testBuildOpencodeArgs({
 
 assert.equal(explicit.args.includes("--session"), true)
 assert.equal(explicit.args[explicit.args.indexOf("--session") + 1], "ses_explicit")
+
+let promptThis
+let promptPayload
+const promptSession = {
+  async prompt(input) {
+    promptThis = this
+    promptPayload = input
+    return { data: "ok" }
+  },
+}
+
+await __testSubmitSessionPrompt({ session: promptSession }, "ses_current", "hello cron")
+assert.equal(promptThis, promptSession)
+assert.deepEqual(promptPayload, {
+  sessionID: "ses_current",
+  parts: [{ type: "text", text: "hello cron" }],
+})
 
 const server = await RoutinesPlugin()
 for (const name of [

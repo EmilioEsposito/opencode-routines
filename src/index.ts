@@ -833,14 +833,28 @@ function nextCronRun(cron: string, after = new Date()): Date {
   throw new Error(`Could not find next run for cron: ${cron}`)
 }
 
+function promptResultError(result: unknown): string | undefined {
+  const error = (result as { error?: unknown } | undefined)?.error
+  if (!error) return
+  return typeof error === "string" ? error : JSON.stringify(error)
+}
+
+export async function __testSubmitSessionPrompt(client: RoutinePromptClient, sessionID: string, prompt: string): Promise<void> {
+  await submitSessionPrompt(client, sessionID, prompt)
+}
+
 async function submitSessionPrompt(client: RoutinePromptClient, sessionID: string, prompt: string): Promise<void> {
-  const send = client.session?.prompt
+  const session = client.session
+  const send = session?.prompt
   if (!send) throw new Error("Current opencode client does not expose session.prompt")
-  const result = (await send({
-    path: { sessionID },
-    body: { parts: [{ type: "text", text: prompt }] },
-  })) as { error?: unknown }
-  if (result?.error) throw new Error(typeof result.error === "string" ? result.error : JSON.stringify(result.error))
+
+  // SDK service methods read `this.client`, so preserve receiver.
+  const result = await send.call(session, {
+    sessionID,
+    parts: [{ type: "text", text: prompt }],
+  })
+  const error = promptResultError(result)
+  if (error) throw new Error(error)
 }
 
 function stopLoop(id: string): boolean {

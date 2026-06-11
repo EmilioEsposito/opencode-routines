@@ -54,13 +54,13 @@
   },
   "homepage": "https://github.com/EmilioEsposito/opencode-routines#readme",
   "dependencies": {
-    "@opencode-ai/plugin": "^1.0.162"
+    "@opencode-ai/plugin": "^1.1.1"
   },
   "devDependencies": {
     "bun-types": "latest",
     "typescript": "^5.7.3"
   },
   "peerDependencies": {
-    "@opencode-ai/plugin": ">=1.0.0"
+    "@opencode-ai/plugin": ">=1.1.1"
   }
 }
