@@ -184,6 +184,7 @@ Scopes are derived from the job's `workdir` (normalized absolute path). This iso
 
 - `list_jobs` defaults to the **current scope** (your current working directory).
 - Use `allScopes: true` to list jobs across all scopes.
+- Job-specific tools (`get_job`, `update_job`, `delete_job`, `run_job`, `job_logs`) also accept `allScopes`, `scopeRoot`, and `includeLegacy` when you need to operate on a job outside the current scope.
 - Use `includeLegacy: true` to include pre-`v1.2.0` jobs stored in `~/.config/opencode/jobs`.
 
 ### Attach URL (optional)
