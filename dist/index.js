@@ -1,12 +1,16 @@
 // @bun
 var __defProp = Object.defineProperty;
+var __returnValue = (v) => v;
+function __exportSetter(name, newValue) {
+  this[name] = __returnValue.bind(null, newValue);
+}
 var __export = (target, all) => {
   for (var name in all)
     __defProp(target, name, {
       get: all[name],
       enumerable: true,
       configurable: true,
-      set: (newValue) => all[name] = () => newValue
+      set: __exportSetter.bind(all, name)
     });
 };
 
@@ -14093,6 +14097,17 @@ function buildOpencodeArgs(job) {
   args.push(run.command ? run.arguments ?? "" : run.prompt ?? "");
   return { command, args };
 }
+function __testBuildOpencodeArgs(job) {
+  return buildOpencodeArgs(job);
+}
+function withReportSession(run, context) {
+  if (run.session || run.continue || run.attachUrl)
+    return run;
+  return { ...run, session: context.sessionID };
+}
+function __testRunSpecWithReportSession(run, sessionID) {
+  return withReportSession(run, { sessionID });
+}
 function buildRunEnvironment() {
   const enhancedPath = getEnhancedPath();
   const existingPath = process.env.PATH;
@@ -14390,7 +14405,7 @@ var SchedulerPlugin = async () => {
           timeoutSeconds: tool.schema.number().optional().describe("Optional: max runtime in seconds (0 disables)."),
           format: tool.schema.string().optional().describe("Optional: output format ('text' or 'json').")
         },
-        async execute(args) {
+        async execute(args, context) {
           const format = normalizeFormat(args.format);
           const slug = args.source ? `${args.source}-${slugify(args.name)}` : slugify(args.name);
           const workdir = normalizeWorkdirPath(args.workdir || process.cwd());
@@ -14456,7 +14471,7 @@ var SchedulerPlugin = async () => {
             slug,
             name: args.name,
             schedule: args.schedule,
-            run: normalizeRunSpec(run),
+            run: normalizeRunSpec(withReportSession(run, context)),
             prompt: args.prompt,
             source: args.source,
             workdir,
@@ -14881,7 +14896,7 @@ ${content.trim()}
           attachUrl: tool.schema.string().optional().describe("Override attach URL"),
           format: tool.schema.string().optional().describe("Optional: output format ('text' or 'json').")
         },
-        async execute(args) {
+        async execute(args, context) {
           const format = normalizeFormat(args.format);
           const job = findJobByName(args.name, findJobOptionsFromArgs(args));
           if (!job) {
@@ -14991,5 +15006,7 @@ ${logs}`, { job, logPath, logs });
 var src_default = SchedulerPlugin;
 export {
   src_default as default,
+  __testRunSpecWithReportSession,
+  __testBuildOpencodeArgs,
   SchedulerPlugin
 };

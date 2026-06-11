@@ -58,6 +58,7 @@ Schedule a job every 6 hours to check if my website is up and alert me on Slack 
 2. The plugin writes a job file (scoped by `workdir`) and installs a timer in your OS scheduler
 3. At the scheduled time, the OS scheduler calls a small supervisor script
 4. The supervisor runs the job, appends logs, and updates job metadata
+5. By default, jobs scheduled from a chat report back to that same parent session via `opencode run --session <id>`; pass an explicit `session`, `continue`, or `attachUrl` to override this behavior
 
 You can also trigger a job immediately via `run_job`—it runs fire-and-forget and appends to the same log file.
 

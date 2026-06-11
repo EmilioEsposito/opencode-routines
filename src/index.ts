@@ -12,7 +12,7 @@
  * - Environment variable injection (PATH for node/npx)
  */
 import type { Plugin } from "@opencode-ai/plugin"
-import { tool } from "@opencode-ai/plugin"
+import { tool, type ToolContext } from "@opencode-ai/plugin"
 import { createWriteStream, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync, unlinkSync } from "fs"
 import { basename, dirname, join, resolve as resolvePath } from "path"
 import { homedir, platform } from "os"
@@ -2238,6 +2238,19 @@ function buildOpencodeArgs(job: Job): { command: string; args: string[] } {
   return { command, args }
 }
 
+export function __testBuildOpencodeArgs(job: Job): { command: string; args: string[] } {
+  return buildOpencodeArgs(job)
+}
+
+function withReportSession(run: JobRunSpec, context: ToolContext): JobRunSpec {
+  if (run.session || run.continue || run.attachUrl) return run
+  return { ...run, session: context.sessionID }
+}
+
+export function __testRunSpecWithReportSession(run: JobRunSpec, sessionID: string): JobRunSpec {
+  return withReportSession(run, { sessionID } as ToolContext)
+}
+
 function buildRunEnvironment(): NodeJS.ProcessEnv {
   const enhancedPath = getEnhancedPath()
   const existingPath = process.env.PATH
@@ -2590,7 +2603,7 @@ export const SchedulerPlugin: Plugin = async () => {
             format: tool.schema.string().optional().describe("Optional: output format ('text' or 'json')."),
           },
 
-          async execute(args) {
+        async execute(args, context) {
             const format = normalizeFormat(args.format)
             const slug = args.source ? `${args.source}-${slugify(args.name)}` : slugify(args.name)
 
@@ -2673,7 +2686,7 @@ export const SchedulerPlugin: Plugin = async () => {
               slug,
               name: args.name,
               schedule: args.schedule,
-              run: normalizeRunSpec(run),
+              run: normalizeRunSpec(withReportSession(run, context)),
               // keep legacy fields as well for backwards-compat / readability
               prompt: args.prompt,
               source: args.source,
@@ -2748,7 +2761,7 @@ Commands:
           format: tool.schema.string().optional().describe("Optional: output format ('text' or 'json')."),
         },
 
-        async execute(args) {
+          async execute(args, context) {
           const format = normalizeFormat(args.format)
 
           const scopeId = args.allScopes
@@ -3225,7 +3238,7 @@ Commands:
           attachUrl: tool.schema.string().optional().describe("Override attach URL"),
           format: tool.schema.string().optional().describe("Optional: output format ('text' or 'json')."),
         },
-        async execute(args) {
+        async execute(args, context) {
           const format = normalizeFormat(args.format)
           const job = findJobByName(args.name, findJobOptionsFromArgs(args))
 
