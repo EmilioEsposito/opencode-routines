@@ -57,6 +57,5 @@ export declare function __testBuildOpencodeArgs(job: Job): {
     command: string;
     args: string[];
 };
-export declare function __testRunSpecWithReportSession(run: JobRunSpec, sessionID: string): JobRunSpec;
 export declare const SchedulerPlugin: Plugin;
 export default SchedulerPlugin;

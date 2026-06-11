@@ -11,8 +11,8 @@
  * - Working directory support for MCP configs
  * - Environment variable injection (PATH for node/npx)
  */
-import type { Plugin } from "@opencode-ai/plugin"
-import { tool, type ToolContext } from "@opencode-ai/plugin"
+import type { Plugin, ToolContext } from "@opencode-ai/plugin"
+import { tool } from "@opencode-ai/plugin"
 import { createWriteStream, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync, unlinkSync } from "fs"
 import { basename, dirname, join, resolve as resolvePath } from "path"
 import { homedir, platform } from "os"
@@ -26,7 +26,8 @@ const LOGS_DIR = join(OPENCODE_CONFIG, "logs")
 const SCHEDULER_DIR = join(OPENCODE_CONFIG, "scheduler")
 const SCOPES_DIR = join(SCHEDULER_DIR, "scopes")
 const SUPERVISOR_PATH = join(SCHEDULER_DIR, "supervisor.pl")
-const SCHEDULER_CONFIG = join(OPENCODE_CONFIG, "opencode-scheduler.json")
+const SCHEDULER_CONFIG = join(OPENCODE_CONFIG, "opencode-routines.json")
+const LEGACY_SCHEDULER_CONFIG = join(OPENCODE_CONFIG, "opencode-scheduler.json")
 
 // Platform detection
 const IS_MAC = platform() === "darwin"
@@ -436,6 +437,46 @@ interface ToolResult<T = unknown> {
   data?: T
 }
 
+type RoutinePromptClient = {
+  session?: {
+    prompt?: (input: unknown) => Promise<unknown>
+  }
+}
+
+type LoopMode = "fixed" | "dynamic"
+
+interface LoopRoutine {
+  id: string
+  sessionID: string
+  prompt: string
+  mode: LoopMode
+  intervalSeconds?: number
+  reason?: string
+  createdAt: string
+  updatedAt: string
+  nextRunAt?: string
+  fires: number
+  timer?: ReturnType<typeof setTimeout>
+}
+
+interface CronRoutine {
+  id: string
+  sessionID: string
+  cron: string
+  prompt: string
+  recurring: boolean
+  durable: boolean
+  createdAt: string
+  updatedAt: string
+  nextRunAt?: string
+  expiresAt?: string
+  fires: number
+  timer?: ReturnType<typeof setTimeout>
+}
+
+const loops = new Map<string, LoopRoutine>()
+const crons = new Map<string, CronRoutine>()
+
 function normalizeFormat(format?: string): OutputFormat {
   return format === "json" ? "json" : "text"
 }
@@ -743,6 +784,79 @@ function validateCronExpression(cron: string): void {
   parseCronField(dayOfMonth, 1, 31, "day of month")
   parseCronField(month, 1, 12, "month")
   parseCronField(dayOfWeek, 0, 7, "day of week", true)
+}
+
+function routineID(prefix: string): string {
+  return `${prefix}_${Math.random().toString(16).slice(2, 10)}`
+}
+
+function clampWakeDelay(seconds: number): number {
+  if (!Number.isFinite(seconds)) return 60
+  return Math.max(60, Math.min(3600, Math.floor(seconds)))
+}
+
+function parseDurationSeconds(input?: string): number | undefined {
+  const match = (input ?? "").trim().match(/^(\d+)(s|m|h)$/i)
+  if (!match) return
+  const value = Number(match[1])
+  if (!Number.isFinite(value) || value <= 0) return
+  const unit = match[2]!.toLowerCase()
+  if (unit === "s") return value
+  if (unit === "m") return value * 60
+  return value * 3600
+}
+
+function cronMatches(cron: string, date: Date): boolean {
+  const [minute, hour, dayOfMonth, month, dayOfWeek] = splitCronExpression(cron)
+  const minuteValues = parseCronField(minute, 0, 59, "minute")
+  const hourValues = parseCronField(hour, 0, 23, "hour")
+  const dayValues = parseCronField(dayOfMonth, 1, 31, "day of month")
+  const monthValues = parseCronField(month, 1, 12, "month")
+  const weekdayValues = parseCronField(dayOfWeek, 0, 7, "day of week", true)
+  return (
+    (minuteValues === null || minuteValues.includes(date.getMinutes())) &&
+    (hourValues === null || hourValues.includes(date.getHours())) &&
+    (dayValues === null || dayValues.includes(date.getDate())) &&
+    (monthValues === null || monthValues.includes(date.getMonth() + 1)) &&
+    (weekdayValues === null || weekdayValues.includes(date.getDay()))
+  )
+}
+
+function nextCronRun(cron: string, after = new Date()): Date {
+  const next = new Date(after.getTime())
+  next.setSeconds(0, 0)
+  next.setMinutes(next.getMinutes() + 1)
+  for (let i = 0; i < 527040; i++) {
+    if (cronMatches(cron, next)) return next
+    next.setMinutes(next.getMinutes() + 1)
+  }
+  throw new Error(`Could not find next run for cron: ${cron}`)
+}
+
+async function submitSessionPrompt(client: RoutinePromptClient, sessionID: string, prompt: string): Promise<void> {
+  const send = client.session?.prompt
+  if (!send) throw new Error("Current opencode client does not expose session.prompt")
+  const result = (await send({
+    path: { sessionID },
+    body: { parts: [{ type: "text", text: prompt }] },
+  })) as { error?: unknown }
+  if (result?.error) throw new Error(typeof result.error === "string" ? result.error : JSON.stringify(result.error))
+}
+
+function stopLoop(id: string): boolean {
+  const loop = loops.get(id)
+  if (!loop) return false
+  if (loop.timer) clearTimeout(loop.timer)
+  loops.delete(id)
+  return true
+}
+
+function stopCron(id: string): boolean {
+  const cron = crons.get(id)
+  if (!cron) return false
+  if (cron.timer) clearTimeout(cron.timer)
+  crons.delete(id)
+  return true
 }
 
 function expandLaunchdEntries(
@@ -2242,15 +2356,6 @@ export function __testBuildOpencodeArgs(job: Job): { command: string; args: stri
   return buildOpencodeArgs(job)
 }
 
-function withReportSession(run: JobRunSpec, context: ToolContext): JobRunSpec {
-  if (run.session || run.continue || run.attachUrl) return run
-  return { ...run, session: context.sessionID }
-}
-
-export function __testRunSpecWithReportSession(run: JobRunSpec, sessionID: string): JobRunSpec {
-  return withReportSession(run, { sessionID } as ToolContext)
-}
-
 function buildRunEnvironment(): NodeJS.ProcessEnv {
   const enhancedPath = getEnhancedPath()
   const existingPath = process.env.PATH
@@ -2293,6 +2398,64 @@ function buildRunEnvironment(): NodeJS.ProcessEnv {
     ...config.env?.set,
     PATH: combinedPath,
     OPENCODE_PERMISSION: JSON.stringify(mergedPolicy),
+  }
+}
+
+function scheduleCreateArgs(): Record<string, unknown> {
+  return {
+    name: tool.schema.string().describe("A short name for the standalone scheduled run (e.g. 'standing desk search')"),
+    schedule: tool.schema
+      .string()
+      .describe(
+        "Cron expression: '0 9 * * *' (daily 9am), '0 */6 * * *' (every 6h), '30 8 * * 1' (Monday 8:30am)",
+      ),
+    prompt: tool.schema.string().optional().describe("Prompt to run (legacy; prefer command/arguments/etc)"),
+    command: tool.schema.string().optional().describe("Optional: opencode command to run (maps to --command)"),
+    arguments: tool.schema.string().optional().describe("Optional: arguments string for command mode"),
+    files: tool.schema
+      .string()
+      .optional()
+      .describe("Optional: comma-separated list of files/dirs to attach (maps to repeated --file)"),
+    agent: tool.schema.string().optional().describe("Optional: agent to use (maps to --agent)"),
+    model: tool.schema.string().optional().describe("Optional: model to use (maps to --model)"),
+    variant: tool.schema.string().optional().describe("Optional: model variant (maps to --variant)"),
+    title: tool.schema.string().optional().describe("Optional: session title (maps to --title)"),
+    share: tool.schema.boolean().optional().describe("Optional: share session (maps to --share)"),
+    continue: tool.schema.boolean().optional().describe("Optional: continue last session (maps to --continue)"),
+    session: tool.schema
+      .string()
+      .optional()
+      .describe("Optional: explicit session id to append to. Omit for a fresh standalone session."),
+    runFormat: tool.schema.string().optional().describe("Optional: run output format (maps to opencode --format: default|json)"),
+    port: tool.schema.number().optional().describe("Optional: server port for local server (maps to --port)"),
+    source: tool.schema.string().optional().describe("Optional: source app (e.g. 'marketplace') - used for filtering"),
+    workdir: tool.schema
+      .string()
+      .optional()
+      .describe("Optional: working directory to run from (for MCP config). Defaults to current directory."),
+    attachUrl: tool.schema.string().optional().describe("Optional: attach URL for opencode run (e.g. http://localhost:4096)."),
+    timeoutSeconds: tool.schema.number().optional().describe("Optional: max runtime in seconds (0 disables)."),
+    format: tool.schema.string().optional().describe("Optional: output format ('text' or 'json')."),
+  }
+}
+
+function scheduleListArgs(): Record<string, unknown> {
+  return {
+    source: tool.schema.string().optional().describe("Filter by source app (e.g. 'marketplace')"),
+    allScopes: tool.schema.boolean().optional().describe("List jobs across all scopes."),
+    includeLegacy: tool.schema.boolean().optional().describe("Include legacy jobs from ~/.config/opencode/jobs"),
+    scopeRoot: tool.schema.string().optional().describe("Optional: scope root directory (defaults to current directory)."),
+    format: tool.schema.string().optional().describe("Optional: output format ('text' or 'json')."),
+  }
+}
+
+function scheduleNamedArgs(): Record<string, unknown> {
+  return {
+    name: tool.schema.string().describe("The job name or slug"),
+    allScopes: tool.schema.boolean().optional().describe("Search across all scopes."),
+    includeLegacy: tool.schema.boolean().optional().describe("Include legacy jobs from ~/.config/opencode/jobs"),
+    scopeRoot: tool.schema.string().optional().describe("Optional: scope root directory (defaults to current directory)."),
+    format: tool.schema.string().optional().describe("Optional: output format ('text' or 'json')."),
   }
 }
 
@@ -2557,9 +2720,252 @@ function getJobLogs(job: Job, options?: { tailLines?: number; maxChars?: number 
 
 // === PLUGIN ===
 
-export const SchedulerPlugin: Plugin = async () => {
+export const SchedulerPlugin: Plugin = async (input) => {
+  const client = input?.client as unknown as RoutinePromptClient
+
+  async function executeTool(name: string, args: unknown, context: ToolContext) {
+    const plugin = await SchedulerPlugin(input)
+    const definition = plugin.tool?.[name]
+    if (!definition) throw new Error(`Scheduler tool not found: ${name}`)
+    return definition.execute(args as never, context)
+  }
+
+  function scheduleLoop(loop: LoopRoutine, delaySeconds: number): void {
+    if (loop.timer) clearTimeout(loop.timer)
+    loop.nextRunAt = new Date(Date.now() + delaySeconds * 1000).toISOString()
+    loop.updatedAt = new Date().toISOString()
+    loop.timer = setTimeout(async () => {
+      if (!loops.has(loop.id)) return
+      try {
+        await submitSessionPrompt(client, loop.sessionID, loop.prompt)
+        loop.fires += 1
+        loop.updatedAt = new Date().toISOString()
+        if (loop.mode === "fixed" && loop.intervalSeconds) scheduleLoop(loop, loop.intervalSeconds)
+      } catch (error) {
+        stopLoop(loop.id)
+        console.error(`[opencode-routines] loop ${loop.id} stopped:`, error)
+      }
+    }, delaySeconds * 1000)
+  }
+
+  function scheduleCron(cron: CronRoutine): void {
+    if (cron.timer) clearTimeout(cron.timer)
+    const next = nextCronRun(cron.cron)
+    cron.nextRunAt = next.toISOString()
+    cron.updatedAt = new Date().toISOString()
+    cron.timer = setTimeout(async () => {
+      if (!crons.has(cron.id)) return
+      if (cron.expiresAt && Date.now() > new Date(cron.expiresAt).getTime()) {
+        stopCron(cron.id)
+        return
+      }
+      try {
+        await submitSessionPrompt(client, cron.sessionID, cron.prompt)
+        cron.fires += 1
+        cron.updatedAt = new Date().toISOString()
+        if (cron.recurring) scheduleCron(cron)
+        else stopCron(cron.id)
+      } catch (error) {
+        stopCron(cron.id)
+        console.error(`[opencode-routines] cron ${cron.id} stopped:`, error)
+      }
+    }, Math.max(0, next.getTime() - Date.now()))
+  }
+
   return {
     tool: {
+      LoopCreate: tool({
+        description:
+          "Start a same-session loop in the current conversation. Fixed interval loops repeat automatically; dynamic loops require ScheduleWakeup to continue.",
+        args: {
+          prompt: tool.schema.string().describe("Prompt or slash command to run in this same session."),
+          interval: tool.schema.string().optional().describe("Optional fixed interval such as 5m, 30s, or 1h. Omit for dynamic mode."),
+          reason: tool.schema.string().optional().describe("Short reason shown in metadata/logs."),
+          fireImmediately: tool.schema.boolean().optional().describe("Whether to enqueue the prompt immediately (default true)."),
+          format: tool.schema.string().optional().describe("Optional: output format ('text' or 'json')."),
+        },
+        async execute(args, context) {
+          const format = normalizeFormat(args.format)
+          const prompt = args.prompt.trim()
+          if (!prompt) return errorResult(format, "Loop prompt cannot be empty.")
+          const intervalSeconds = parseDurationSeconds(args.interval)
+          if (args.interval !== undefined && intervalSeconds === undefined) {
+            return errorResult(format, "Invalid interval. Use forms like 30s, 5m, or 1h.")
+          }
+          const now = new Date().toISOString()
+          const loop: LoopRoutine = {
+            id: routineID("loop"),
+            sessionID: context.sessionID,
+            prompt,
+            mode: intervalSeconds === undefined ? "dynamic" : "fixed",
+            intervalSeconds,
+            reason: args.reason,
+            createdAt: now,
+            updatedAt: now,
+            fires: 0,
+          }
+          loops.set(loop.id, loop)
+          if (args.fireImmediately !== false) {
+            await submitSessionPrompt(client, loop.sessionID, loop.prompt)
+            loop.fires += 1
+          }
+          if (loop.mode === "fixed" && loop.intervalSeconds) scheduleLoop(loop, loop.intervalSeconds)
+          return okResult(
+            format,
+            `${loop.mode === "fixed" ? "Fixed" : "Dynamic"} loop ${loop.id} started in this session.`,
+            { loop: { ...loop, timer: undefined } },
+          )
+        },
+      }),
+
+      LoopList: tool({
+        description: "List active same-session loops owned by this plugin process.",
+        args: {
+          format: tool.schema.string().optional().describe("Optional: output format ('text' or 'json')."),
+        },
+        async execute(args) {
+          const format = normalizeFormat(args.format)
+          const data = [...loops.values()].map((loop) => ({ ...loop, timer: undefined }))
+          if (data.length === 0) return okResult(format, "No active loops.", { loops: data })
+          return okResult(
+            format,
+            data
+              .map(
+                (loop) =>
+                  `${loop.id} ${loop.mode}${loop.intervalSeconds ? ` every ${loop.intervalSeconds}s` : ""} session=${loop.sessionID} fires=${loop.fires}: ${loop.prompt}`,
+              )
+              .join("\n"),
+            { loops: data },
+          )
+        },
+      }),
+
+      LoopDelete: tool({
+        description: "Stop an active same-session loop by ID.",
+        args: {
+          id: tool.schema.string().describe("Loop ID returned by LoopCreate."),
+          format: tool.schema.string().optional().describe("Optional: output format ('text' or 'json')."),
+        },
+        async execute(args) {
+          const format = normalizeFormat(args.format)
+          return stopLoop(args.id)
+            ? okResult(format, `Stopped loop ${args.id}.`, { id: args.id })
+            : errorResult(format, `Loop ${args.id} not found.`, { id: args.id })
+        },
+      }),
+
+      ScheduleWakeup: tool({
+        description:
+          "Schedule when to resume work in /loop dynamic mode. Only works when there is an active dynamic loop in this session; omit this call to end the dynamic loop.",
+        args: {
+          delaySeconds: tool.schema.number().describe("Seconds until wake-up. Clamped to 60-3600 seconds."),
+          prompt: tool.schema.string().describe("The /loop prompt to fire on wake-up. Pass it back verbatim to continue."),
+          reason: tool.schema.string().describe("One sentence explaining why this wake-up is scheduled."),
+          format: tool.schema.string().optional().describe("Optional: output format ('text' or 'json')."),
+        },
+        async execute(args, context) {
+          const format = normalizeFormat(args.format)
+          const loop = [...loops.values()].find(
+            (item) => item.sessionID === context.sessionID && item.mode === "dynamic" && item.prompt === args.prompt,
+          )
+          if (!loop) {
+            return errorResult(
+              format,
+              "ScheduleWakeup is only available inside an active dynamic /loop for this session and prompt.",
+            )
+          }
+          const delaySeconds = clampWakeDelay(args.delaySeconds)
+          loop.reason = args.reason
+          scheduleLoop(loop, delaySeconds)
+          return okResult(format, `Wake-up scheduled in ${delaySeconds}s for loop ${loop.id}.`, {
+            id: loop.id,
+            delaySeconds,
+            nextRunAt: loop.nextRunAt,
+          })
+        },
+      }),
+
+      CronCreate: tool({
+        description:
+          "Schedule a same-session prompt at wall-clock times using a 5-field cron expression. This is session-scoped, not a standalone OS-backed schedule.",
+        args: {
+          cron: tool.schema.string().describe("5-field cron in local timezone: M H DoM Mon DoW."),
+          prompt: tool.schema.string().describe("Prompt to enqueue in this same session at each fire time."),
+          recurring: tool.schema.boolean().optional().describe("true = fire every match (default true); false = fire once then delete."),
+          durable: tool.schema
+            .boolean()
+            .optional()
+            .describe("Accepted for Claude compatibility, but currently session-only in this plugin."),
+          format: tool.schema.string().optional().describe("Optional: output format ('text' or 'json')."),
+        },
+        async execute(args, context) {
+          const format = normalizeFormat(args.format)
+          try {
+            validateCronExpression(args.cron)
+          } catch (error) {
+            const msg = error instanceof Error ? error.message : String(error)
+            return errorResult(format, `Invalid cron: ${msg}`)
+          }
+          const prompt = args.prompt.trim()
+          if (!prompt) return errorResult(format, "Cron prompt cannot be empty.")
+          const now = new Date().toISOString()
+          const cron: CronRoutine = {
+            id: routineID("cron"),
+            sessionID: context.sessionID,
+            cron: args.cron,
+            prompt,
+            recurring: args.recurring !== false,
+            durable: false,
+            createdAt: now,
+            updatedAt: now,
+            expiresAt: args.recurring === false ? undefined : new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+            fires: 0,
+          }
+          crons.set(cron.id, cron)
+          scheduleCron(cron)
+          const durableNote = args.durable ? " durable requested but current implementation is session-only." : ""
+          return okResult(format, `Scheduled ${cron.id} (${args.cron}) [session-only].${durableNote}`, {
+            cron: { ...cron, timer: undefined },
+          })
+        },
+      }),
+
+      CronList: tool({
+        description: "List same-session cron prompts created via CronCreate.",
+        args: {
+          format: tool.schema.string().optional().describe("Optional: output format ('text' or 'json')."),
+        },
+        async execute(args) {
+          const format = normalizeFormat(args.format)
+          const data = [...crons.values()].map((cron) => ({ ...cron, timer: undefined }))
+          if (data.length === 0) return okResult(format, "No active cron prompts.", { crons: data })
+          return okResult(
+            format,
+            data
+              .map(
+                (cron) =>
+                  `${cron.id} ${cron.cron} (${cron.recurring ? "recurring" : "one-shot"}) [session-only] next=${cron.nextRunAt ?? "unknown"}: ${cron.prompt}`,
+              )
+              .join("\n"),
+            { crons: data },
+          )
+        },
+      }),
+
+      CronDelete: tool({
+        description: "Cancel a same-session cron prompt by ID.",
+        args: {
+          id: tool.schema.string().describe("Job ID returned by CronCreate."),
+          format: tool.schema.string().optional().describe("Optional: output format ('text' or 'json')."),
+        },
+        async execute(args) {
+          const format = normalizeFormat(args.format)
+          return stopCron(args.id)
+            ? okResult(format, `Cancelled ${args.id}.`, { id: args.id })
+            : errorResult(format, `Cron ${args.id} not found.`, { id: args.id })
+        },
+      }),
+
        schedule_job: tool({
            description:
             "Schedule a recurring job to run an opencode prompt. Uses launchd (Mac), systemd (Linux), Windows Task Scheduler, or cron fallback when needed.",
@@ -2603,7 +3009,7 @@ export const SchedulerPlugin: Plugin = async () => {
             format: tool.schema.string().optional().describe("Optional: output format ('text' or 'json')."),
           },
 
-        async execute(args, context) {
+        async execute(args) {
             const format = normalizeFormat(args.format)
             const slug = args.source ? `${args.source}-${slugify(args.name)}` : slugify(args.name)
 
@@ -2686,7 +3092,7 @@ export const SchedulerPlugin: Plugin = async () => {
               slug,
               name: args.name,
               schedule: args.schedule,
-              run: normalizeRunSpec(withReportSession(run, context)),
+              run: normalizeRunSpec(run),
               // keep legacy fields as well for backwards-compat / readability
               prompt: args.prompt,
               source: args.source,
@@ -2761,7 +3167,7 @@ Commands:
           format: tool.schema.string().optional().describe("Optional: output format ('text' or 'json')."),
         },
 
-          async execute(args, context) {
+          async execute(args) {
           const format = normalizeFormat(args.format)
 
           const scopeId = args.allScopes
@@ -3238,7 +3644,7 @@ Commands:
           attachUrl: tool.schema.string().optional().describe("Override attach URL"),
           format: tool.schema.string().optional().describe("Optional: output format ('text' or 'json')."),
         },
-        async execute(args, context) {
+        async execute(args) {
           const format = normalizeFormat(args.format)
           const job = findJobByName(args.name, findJobOptionsFromArgs(args))
 
@@ -3358,6 +3764,66 @@ Commands:
           }
 
           return okResult(format, `Logs for ${job.name}\n\n${logs}`, { job, logPath, logs })
+        },
+      }),
+
+      ScheduleCreate: tool({
+        description:
+          "Create a durable local standalone scheduled opencode run. This is the local analogue of Claude Code cloud /schedule, but intentionally does not register a /schedule slash command because that name is ambiguous.",
+        args: scheduleCreateArgs() as never,
+        async execute(args, context) {
+          return executeTool("schedule_job", args, context)
+        },
+      }),
+
+      ScheduleList: tool({
+        description: "List durable local standalone scheduled opencode runs.",
+        args: scheduleListArgs() as never,
+        async execute(args, context) {
+          return executeTool("list_jobs", args, context)
+        },
+      }),
+
+      ScheduleDelete: tool({
+        description: "Delete a durable local standalone scheduled opencode run by name or slug.",
+        args: scheduleNamedArgs() as never,
+        async execute(args, context) {
+          return executeTool("delete_job", args, context)
+        },
+      }),
+
+      ScheduleRun: tool({
+        description: "Run a durable local standalone scheduled opencode job immediately.",
+        args: {
+          ...scheduleNamedArgs(),
+          prompt: tool.schema.string().optional().describe("Override prompt for this run"),
+          command: tool.schema.string().optional().describe("Override command for this run"),
+          arguments: tool.schema.string().optional().describe("Override arguments for command mode"),
+          files: tool.schema.string().optional().describe("Override comma-separated files/dirs to attach"),
+          agent: tool.schema.string().optional().describe("Override agent"),
+          model: tool.schema.string().optional().describe("Override model"),
+          variant: tool.schema.string().optional().describe("Override variant"),
+          title: tool.schema.string().optional().describe("Override title"),
+          share: tool.schema.boolean().optional().describe("Override share flag"),
+          continue: tool.schema.boolean().optional().describe("Override continue flag"),
+          session: tool.schema.string().optional().describe("Override session id"),
+          runFormat: tool.schema.string().optional().describe("Override run output format (default|json)"),
+          port: tool.schema.number().optional().describe("Override port"),
+          attachUrl: tool.schema.string().optional().describe("Override attach URL"),
+        } as never,
+        async execute(args, context) {
+          return executeTool("run_job", args, context)
+        },
+      }),
+
+      ScheduleLogs: tool({
+        description: "View logs for a durable local standalone scheduled opencode run.",
+        args: {
+          ...scheduleNamedArgs(),
+          lines: tool.schema.number().optional().describe("Number of lines from the end of the log (default 200)."),
+        } as never,
+        async execute(args, context) {
+          return executeTool("job_logs", args, context)
         },
       }),
     },
