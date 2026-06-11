@@ -1,6 +1,15 @@
 import assert from "node:assert/strict"
-import RoutinesPlugin from "../dist/index.js"
-import tuiPlugin from "../dist/tui.js"
+import { existsSync, mkdtempSync, readFileSync, writeFileSync, mkdirSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+
+// Isolate config side effects (managed command install) from the real user
+// config. Must be set before importing the plugin module's consumers run it.
+const configRoot = mkdtempSync(join(tmpdir(), "routines-validate-"))
+process.env.XDG_CONFIG_HOME = configRoot
+
+const { default: RoutinesPlugin } = await import("../dist/index.js")
+const { default: tuiPlugin } = await import("../dist/tui.js")
 
 const { __test } = RoutinesPlugin
 
@@ -44,7 +53,28 @@ assert.deepEqual(promptPayload, {
   body: { parts: [{ type: "text", text: "hello cron" }] },
 })
 
+// Managed command files: user-owned file (no marker) must never be touched.
+const commandsDir = join(configRoot, "opencode", "commands")
+mkdirSync(commandsDir, { recursive: true })
+const userOwned = join(commandsDir, "loop.md")
+writeFileSync(userOwned, "my own loop command\n")
+
 const server = await RoutinesPlugin()
+
+assert.equal(readFileSync(userOwned, "utf-8"), "my own loop command\n", "user-owned loop.md must not be overwritten")
+for (const file of ["loops.md", "stop-loop.md", "schedule-standalone-session.md"]) {
+  const dest = join(commandsDir, file)
+  assert.ok(existsSync(dest), `${file} should be installed`)
+  assert.ok(readFileSync(dest, "utf-8").includes("managed-by: opencode-routines"), `${file} should carry the managed marker`)
+}
+
+// commands: false opts out entirely.
+const optOutRoot = mkdtempSync(join(tmpdir(), "routines-validate-optout-"))
+process.env.XDG_CONFIG_HOME = optOutRoot
+await RoutinesPlugin(undefined, { commands: false })
+assert.ok(!existsSync(join(optOutRoot, "opencode", "commands", "loops.md")), "commands:false must skip install")
+process.env.XDG_CONFIG_HOME = configRoot
+
 for (const name of [
   "LoopCreate",
   "LoopList",

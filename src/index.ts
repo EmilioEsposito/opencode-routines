@@ -13,7 +13,7 @@
  */
 import type { Plugin, ToolContext } from "@opencode-ai/plugin"
 import { tool } from "@opencode-ai/plugin"
-import { createWriteStream, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync, unlinkSync } from "fs"
+import { createWriteStream, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync, unlinkSync } from "fs"
 import { basename, dirname, join, resolve as resolvePath } from "path"
 import { homedir, platform } from "os"
 import { execFileSync, execSync, spawn, type ChildProcess } from "child_process"
@@ -2732,10 +2732,108 @@ function getJobLogs(job: Job, options?: { tailLines?: number; maxChars?: number 
   }
 }
 
+
+// === Managed slash command files ===
+//
+// The server plugin idempotently installs OpenCode custom command files so
+// `/loop`, `/loops`, `/stop-loop`, and `/schedule-standalone-session` work in
+// every OpenCode surface that reads `~/.config/opencode/commands/` (terminal
+// TUI and Desktop). Files are marker-guarded: we only create or update files
+// we own, and we never touch files a user created or edited (marker removed).
+//
+// Opt out per install with plugin options: ["opencode-routines", {"commands": false}]
+
+const MANAGED_COMMAND_MARKER = "managed-by: opencode-routines"
+
+const MANAGED_COMMANDS: Record<string, string> = {
+  "loop.md": `---
+description: Start a same-session loop (opencode-routines)
+---
+<!-- ${MANAGED_COMMAND_MARKER} -->
+
+Use the LoopCreate tool from opencode-routines to start a same-session loop.
+
+Arguments: $ARGUMENTS
+
+Rules:
+- If the first argument looks like an interval (30s, 5m, 1h), pass it as \`interval\` and the rest as \`prompt\`.
+- Otherwise start a dynamic loop with the full arguments as \`prompt\`.
+- If no arguments were provided, ask what prompt to loop.
+- Confirm the created loop id and mode in one short sentence.
+`,
+  "loops.md": `---
+description: List active same-session loops (opencode-routines)
+---
+<!-- ${MANAGED_COMMAND_MARKER} -->
+
+Call the LoopList tool from opencode-routines and show the active loops as a short table (id, mode/interval, fires, prompt). If there are none, say so in one sentence.
+`,
+  "stop-loop.md": `---
+description: Stop a same-session loop (opencode-routines)
+---
+<!-- ${MANAGED_COMMAND_MARKER} -->
+
+Stop a same-session loop using opencode-routines tools.
+
+Arguments: $ARGUMENTS
+
+Rules:
+- If an argument matches a loop id, call LoopDelete with it.
+- Otherwise call LoopList first; if exactly one loop is active, stop it; if several, list them and ask which to stop.
+`,
+  "schedule-standalone-session.md": `---
+description: Create a durable standalone scheduled opencode run (opencode-routines)
+---
+<!-- ${MANAGED_COMMAND_MARKER} -->
+
+Create a durable OS-backed standalone schedule using the ScheduleCreate tool from opencode-routines.
+
+Arguments: $ARGUMENTS
+
+Rules:
+- Derive a short job name and a 5-field cron expression from the arguments; ask if the schedule is ambiguous.
+- Use the remaining text as the prompt for the standalone run.
+- After creating, report the job name, cron, and next steps (ScheduleList / ScheduleLogs) in two sentences max.
+`,
+}
+
+function managedCommandsDir(): string {
+  const xdg = process.env.XDG_CONFIG_HOME?.trim()
+  const base = xdg ? xdg : join(homedir(), ".config")
+  return join(base, "opencode", "commands")
+}
+
+function syncManagedCommands(): void {
+  const dir = managedCommandsDir()
+  ensureDir(dir)
+  for (const [filename, content] of Object.entries(MANAGED_COMMANDS)) {
+    const dest = join(dir, filename)
+    const desired = `${content.trimEnd()}\n`
+    try {
+      if (existsSync(dest)) {
+        const current = readFileSync(dest, "utf-8")
+        // User-owned file (no marker): never touch it.
+        if (!current.includes(MANAGED_COMMAND_MARKER)) continue
+        // Ours and current: no-op to avoid spurious mtime bumps/watch reloads.
+        if (current === desired) continue
+      }
+      const staged = `${dest}.opencode-routines.tmp`
+      writeFileSync(staged, desired)
+      renameSync(staged, dest)
+    } catch (error) {
+      console.error(`[opencode-routines] failed to install command ${filename}:`, error)
+    }
+  }
+}
+
 // === PLUGIN ===
 
-export const SchedulerPlugin: Plugin = async (input) => {
+export const SchedulerPlugin: Plugin = async (input, options) => {
   const client = input?.client as unknown as RoutinePromptClient
+
+  if ((options as { commands?: boolean } | undefined)?.commands !== false) {
+    syncManagedCommands()
+  }
 
   async function executeTool(name: string, args: unknown, context: ToolContext) {
     const plugin = await SchedulerPlugin(input)

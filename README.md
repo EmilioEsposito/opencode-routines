@@ -34,7 +34,17 @@ Add the server plugin to your OpenCode config (`~/.config/opencode/opencode.json
 
 OpenCode installs the package from npm on next start. Use `@latest` if you want new versions on restart, or pin a version such as `"opencode-routines@0.1.1"`.
 
-Optional TUI slash commands are published as a companion package, `opencode-routines-tui`. It is a **TUI plugin**, which OpenCode loads from `tui.json` — NOT from `opencode.json`'s `plugin` array (that array is for server plugins only; the server loader will reject it with `must default export an object with server()`).
+That single entry is the whole packaged experience: on load, the server plugin also installs slash commands (`/loop`, `/loops`, `/stop-loop`, `/schedule-standalone-session`) as managed OpenCode custom command files under `~/.config/opencode/commands/`. These work in **both** the terminal TUI and OpenCode Desktop. The install is idempotent and marker-guarded: only files containing the `managed-by: opencode-routines` marker are ever created or updated, so a user-edited `loop.md` (marker removed) is never touched. Restart OpenCode once after the first install for the commands to appear. Opt out with plugin options:
+
+```jsonc
+{
+  "plugin": [["opencode-routines@latest", { "commands": false }]]
+}
+```
+
+### Optional native TUI dialogs
+
+`opencode-routines-tui` is an optional companion package that replaces the prompt-based commands with native TUI dialogs (interactive loop list, prompt dialogs). It is a **TUI plugin**, which OpenCode loads from `tui.json` — NOT from `opencode.json`'s `plugin` array (that array is for server plugins only; the server loader will reject it with `must default export an object with server()`).
 
 Add it to `~/.config/opencode/tui.json` (or a project-level `.opencode/tui.json`, or a custom path via the `OPENCODE_TUI_CONFIG` env var):
 
@@ -48,7 +58,7 @@ Add it to `~/.config/opencode/tui.json` (or a project-level `.opencode/tui.json`
 
 `opencode-routines-tui` is separate so the terminal TUI can install and load the TUI plugin entrypoint (`exports["./tui"]`). The root package still ships a `./tui` export for advanced/manual loaders, but installs should use the companion package via `tui.json`.
 
-TUI slash commands currently work in the **terminal TUI** (`opencode` in a terminal). OpenCode Desktop builds its slash list from a different command registry and does not load `tui.json` TUI plugins, so these slash commands do not appear there yet.
+The TUI plugin only works in the **terminal TUI** (`opencode` in a terminal); OpenCode Desktop builds its slash list from a different command registry and does not load `tui.json` TUI plugins. Note that installing the TUI plugin alongside the managed command files shows both variants of each slash command in the terminal TUI — if that bothers you, disable the managed commands with `{ "commands": false }` (above) and rely on the TUI plugin there.
 
 ## What it provides
 
