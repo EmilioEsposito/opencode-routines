@@ -1,8 +1,10 @@
 import assert from "node:assert/strict"
-import RoutinesPlugin, { __testBuildOpencodeArgs, __testSubmitSessionPrompt } from "../dist/index.js"
+import RoutinesPlugin from "../dist/index.js"
 import tuiPlugin from "../dist/tui.js"
 
-const standalone = __testBuildOpencodeArgs({
+const { __test } = RoutinesPlugin
+
+const standalone = __test.buildOpencodeArgs({
   slug: "demo",
   name: "Demo",
   schedule: "*/10 * * * *",
@@ -14,7 +16,7 @@ assert.equal(standalone.args[0], "run")
 assert.equal(standalone.args.includes("--session"), false)
 assert.equal(standalone.args.at(-1), "fresh standalone")
 
-const explicit = __testBuildOpencodeArgs({
+const explicit = __test.buildOpencodeArgs({
   slug: "demo",
   name: "Demo",
   schedule: "*/10 * * * *",
@@ -28,18 +30,18 @@ assert.equal(explicit.args[explicit.args.indexOf("--session") + 1], "ses_explici
 let promptThis
 let promptPayload
 const promptSession = {
-  async prompt(input) {
+  async promptAsync(input) {
     promptThis = this
     promptPayload = input
     return { data: "ok" }
   },
 }
 
-await __testSubmitSessionPrompt({ session: promptSession }, "ses_current", "hello cron")
+await __test.submitSessionPrompt({ session: promptSession }, "ses_current", "hello cron")
 assert.equal(promptThis, promptSession)
 assert.deepEqual(promptPayload, {
-  sessionID: "ses_current",
-  parts: [{ type: "text", text: "hello cron" }],
+  path: { id: "ses_current" },
+  body: { parts: [{ type: "text", text: "hello cron" }] },
 })
 
 const server = await RoutinesPlugin()

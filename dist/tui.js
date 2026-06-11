@@ -54,11 +54,9 @@ function loopID() {
 }
 async function submitPrompt(api, loop) {
   loop.fires += 1;
-  await api.client.session.prompt({
-    path: { sessionID: loop.sessionID },
-    body: {
-      parts: [{ type: "text", text: loop.prompt }]
-    }
+  await api.client.session.promptAsync({
+    sessionID: loop.sessionID,
+    parts: [{ type: "text", text: loop.prompt }]
   });
 }
 function scheduleFixed(api, loop) {

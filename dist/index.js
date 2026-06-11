@@ -12969,17 +12969,17 @@ function promptResultError(result) {
     return;
   return typeof error45 === "string" ? error45 : JSON.stringify(error45);
 }
-async function __testSubmitSessionPrompt(client, sessionID, prompt) {
+async function testSubmitSessionPrompt(client, sessionID, prompt) {
   await submitSessionPrompt(client, sessionID, prompt);
 }
 async function submitSessionPrompt(client, sessionID, prompt) {
   const session = client.session;
-  const send = session?.prompt;
+  const send = session?.promptAsync;
   if (!send)
-    throw new Error("Current opencode client does not expose session.prompt");
+    throw new Error("Current opencode client does not expose session.promptAsync");
   const result = await send.call(session, {
-    sessionID,
-    parts: [{ type: "text", text: prompt }]
+    path: { id: sessionID },
+    body: { parts: [{ type: "text", text: prompt }] }
   });
   const error45 = promptResultError(result);
   if (error45)
@@ -14182,7 +14182,7 @@ function buildOpencodeArgs(job) {
   args.push(run.command ? run.arguments ?? "" : run.prompt ?? "");
   return { command, args };
 }
-function __testBuildOpencodeArgs(job) {
+function testBuildOpencodeArgs(job) {
   return buildOpencodeArgs(job);
 }
 function buildRunEnvironment() {
@@ -15386,10 +15386,12 @@ ${logs}`, { job, logPath, logs });
     }
   };
 };
+SchedulerPlugin.__test = {
+  buildOpencodeArgs: testBuildOpencodeArgs,
+  submitSessionPrompt: testSubmitSessionPrompt
+};
 var src_default = SchedulerPlugin;
 export {
   src_default as default,
-  __testSubmitSessionPrompt,
-  __testBuildOpencodeArgs,
   SchedulerPlugin
 };

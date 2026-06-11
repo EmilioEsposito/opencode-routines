@@ -439,7 +439,7 @@ interface ToolResult<T = unknown> {
 
 type RoutinePromptClient = {
   session?: {
-    prompt?: (input: unknown) => Promise<unknown>
+    promptAsync?: (input: unknown) => Promise<unknown>
   }
 }
 
@@ -839,19 +839,19 @@ function promptResultError(result: unknown): string | undefined {
   return typeof error === "string" ? error : JSON.stringify(error)
 }
 
-export async function __testSubmitSessionPrompt(client: RoutinePromptClient, sessionID: string, prompt: string): Promise<void> {
+async function testSubmitSessionPrompt(client: RoutinePromptClient, sessionID: string, prompt: string): Promise<void> {
   await submitSessionPrompt(client, sessionID, prompt)
 }
 
 async function submitSessionPrompt(client: RoutinePromptClient, sessionID: string, prompt: string): Promise<void> {
   const session = client.session
-  const send = session?.prompt
-  if (!send) throw new Error("Current opencode client does not expose session.prompt")
+  const send = session?.promptAsync
+  if (!send) throw new Error("Current opencode client does not expose session.promptAsync")
 
   // SDK service methods read `this.client`, so preserve receiver.
   const result = await send.call(session, {
-    sessionID,
-    parts: [{ type: "text", text: prompt }],
+    path: { id: sessionID },
+    body: { parts: [{ type: "text", text: prompt }] },
   })
   const error = promptResultError(result)
   if (error) throw new Error(error)
@@ -2366,7 +2366,7 @@ function buildOpencodeArgs(job: Job): { command: string; args: string[] } {
   return { command, args }
 }
 
-export function __testBuildOpencodeArgs(job: Job): { command: string; args: string[] } {
+function testBuildOpencodeArgs(job: Job): { command: string; args: string[] } {
   return buildOpencodeArgs(job)
 }
 
@@ -3845,4 +3845,14 @@ Commands:
 }
 
 // Default export for OpenCode plugin system
+;(SchedulerPlugin as typeof SchedulerPlugin & {
+  __test?: {
+    buildOpencodeArgs: typeof testBuildOpencodeArgs
+    submitSessionPrompt: typeof testSubmitSessionPrompt
+  }
+}).__test = {
+  buildOpencodeArgs: testBuildOpencodeArgs,
+  submitSessionPrompt: testSubmitSessionPrompt,
+}
+
 export default SchedulerPlugin
