@@ -1,4 +1,4 @@
-import type { TuiCommand, TuiPlugin, TuiPluginApi, TuiPluginModule } from "@opencode-ai/plugin/tui"
+import type { TuiPlugin, TuiPluginApi, TuiPluginModule } from "@opencode-ai/plugin/tui"
 
 type TuiApi = TuiPluginApi
 
@@ -165,49 +165,10 @@ function showStandaloneSchedulesHelp(api: TuiApi) {
   )
 }
 
-function legacyCommands(api: TuiApi): TuiCommand[] {
-  return [
-    {
-      title: "Start same-session loop",
-      value: "routines.loop",
-      description: "Start a same-session loop. Fixed: 5m <prompt>; dynamic: <prompt>.",
-      category: "Scheduler",
-      slash: { name: "loop" },
-      onSelect: () => openLoopPrompt(api),
-    },
-    {
-      title: "List active loops",
-      value: "routines.loops",
-      description: "List and stop active same-session loops.",
-      category: "Scheduler",
-      slash: { name: "loops" },
-      onSelect: () => showLoops(api),
-    },
-    {
-      title: "Stop a same-session loop",
-      value: "routines.stop-loop",
-      description: "List active loops and select one to stop.",
-      category: "Scheduler",
-      slash: { name: "stop-loop" },
-      onSelect: () => showLoops(api),
-    },
-    {
-      title: "Create standalone scheduled session",
-      value: "routines.schedule-standalone-session",
-      description: "Show help for durable OS-backed standalone schedules.",
-      category: "Scheduler",
-      slash: { name: "schedule-standalone-session" },
-      onSelect: () => showStandaloneSchedulesHelp(api),
-    },
-  ]
-}
-
 const tui: TuiPlugin = async (api) => {
   api.lifecycle.onDispose(() => {
     for (const id of [...loops.keys()]) stopLoop(id)
   })
-
-  api.command?.register(() => legacyCommands(api))
 
   api.keymap.registerLayer({
     commands: [

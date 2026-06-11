@@ -34,16 +34,21 @@ Add the server plugin to your OpenCode config (`~/.config/opencode/opencode.json
 
 OpenCode installs the package from npm on next start. Use `@latest` if you want new versions on restart, or pin a version such as `"opencode-routines@0.1.1"`.
 
-Optional TUI slash commands are published as a companion package:
+Optional TUI slash commands are published as a companion package, `opencode-routines-tui`. It is a **TUI plugin**, which OpenCode loads from `tui.json` — NOT from `opencode.json`'s `plugin` array (that array is for server plugins only; the server loader will reject it with `must default export an object with server()`).
+
+Add it to `~/.config/opencode/tui.json` (or a project-level `.opencode/tui.json`, or a custom path via the `OPENCODE_TUI_CONFIG` env var):
 
 ```jsonc
+// ~/.config/opencode/tui.json
 {
-  "$schema": "https://opencode.ai/config.json",
-  "plugin": ["opencode-routines@latest", "opencode-routines-tui@latest"]
+  "$schema": "https://opencode.ai/tui.json",
+  "plugin": ["opencode-routines-tui@latest"]
 }
 ```
 
-`opencode-routines-tui` is separate so OpenCode can explicitly install and load the TUI plugin entrypoint. The root package still ships a `./tui` export for advanced/manual loaders, but managed installs should use the companion package.
+`opencode-routines-tui` is separate so the terminal TUI can install and load the TUI plugin entrypoint (`exports["./tui"]`). The root package still ships a `./tui` export for advanced/manual loaders, but installs should use the companion package via `tui.json`.
+
+TUI slash commands currently work in the **terminal TUI** (`opencode` in a terminal). OpenCode Desktop builds its slash list from a different command registry and does not load `tui.json` TUI plugins, so these slash commands do not appear there yet.
 
 ## What it provides
 
@@ -131,7 +136,7 @@ Legacy compatibility tools from `opencode-scheduler` are still present: `schedul
 
 ## TUI slash commands
 
-Available when `opencode-routines-tui` is installed:
+Available in the terminal TUI when `opencode-routines-tui` is installed via `tui.json` (see Install above):
 
 | Command | Meaning |
 |---|---|
@@ -165,7 +170,7 @@ Standalone schedule backends:
 
 - Requires OpenCode `1.17.3` or newer.
 - OpenCode loads config once at startup. Restart OpenCode after changing plugin configuration.
-- `opencode-routines-tui` requires OpenCode's TUI plugin runtime. If your OpenCode build does not support TUI plugins, install only `opencode-routines`.
+- `opencode-routines-tui` requires OpenCode's terminal TUI plugin runtime and is loaded via `tui.json`, not `opencode.json`. OpenCode Desktop does not load TUI plugins yet — there, install only `opencode-routines`.
 - `CronCreate({ durable: true })` is accepted for Claude Code compatibility but currently behaves as session-only.
 
 ## Debugging

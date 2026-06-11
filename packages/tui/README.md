@@ -6,17 +6,27 @@
 
 TUI slash commands for [`opencode-routines`](https://www.npmjs.com/package/opencode-routines).
 
-Install this alongside the server plugin:
+This is a **TUI plugin**: OpenCode loads it from `tui.json`, NOT from `opencode.json`'s `plugin` array (that array is for server plugins only and will reject this package with `must default export an object with server()`).
+
+Install the server plugin in `opencode.json` and this package in `tui.json`:
 
 ```jsonc
+// ~/.config/opencode/opencode.jsonc
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": [
-    "opencode-routines@latest",
-    "opencode-routines-tui@latest"
-  ]
+  "plugin": ["opencode-routines@latest"]
 }
 ```
+
+```jsonc
+// ~/.config/opencode/tui.json  (or .opencode/tui.json, or OPENCODE_TUI_CONFIG=<path>)
+{
+  "$schema": "https://opencode.ai/tui.json",
+  "plugin": ["opencode-routines-tui@latest"]
+}
+```
+
+Slash commands appear in the **terminal TUI**. OpenCode Desktop does not load TUI plugins yet.
 
 Available commands:
 

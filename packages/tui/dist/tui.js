@@ -155,48 +155,11 @@ function showStandaloneSchedulesHelp(api) {
     message: "Use the ScheduleCreate tool (or natural language like 'create a standalone scheduled run...') to create durable OS-backed standalone sessions. The ambiguous /schedule command is intentionally not registered."
   }));
 }
-function legacyCommands(api) {
-  return [
-    {
-      title: "Start same-session loop",
-      value: "routines.loop",
-      description: "Start a same-session loop. Fixed: 5m <prompt>; dynamic: <prompt>.",
-      category: "Scheduler",
-      slash: { name: "loop" },
-      onSelect: () => openLoopPrompt(api)
-    },
-    {
-      title: "List active loops",
-      value: "routines.loops",
-      description: "List and stop active same-session loops.",
-      category: "Scheduler",
-      slash: { name: "loops" },
-      onSelect: () => showLoops(api)
-    },
-    {
-      title: "Stop a same-session loop",
-      value: "routines.stop-loop",
-      description: "List active loops and select one to stop.",
-      category: "Scheduler",
-      slash: { name: "stop-loop" },
-      onSelect: () => showLoops(api)
-    },
-    {
-      title: "Create standalone scheduled session",
-      value: "routines.schedule-standalone-session",
-      description: "Show help for durable OS-backed standalone schedules.",
-      category: "Scheduler",
-      slash: { name: "schedule-standalone-session" },
-      onSelect: () => showStandaloneSchedulesHelp(api)
-    }
-  ];
-}
 var tui = async (api) => {
   api.lifecycle.onDispose(() => {
     for (const id of [...loops.keys()])
       stopLoop(id);
   });
-  api.command?.register(() => legacyCommands(api));
   api.keymap.registerLayer({
     commands: [
       {
