@@ -216,6 +216,7 @@ const tui: TuiPlugin = async (api) => {
         title: "Start same-session loop",
         category: "Scheduler",
         namespace: "palette",
+        slashName: "loop",
         run: () => openLoopPrompt(api),
       },
       {
@@ -223,6 +224,7 @@ const tui: TuiPlugin = async (api) => {
         title: "List active loops",
         category: "Scheduler",
         namespace: "palette",
+        slashName: "loops",
         run: () => showLoops(api),
       },
       {
@@ -230,6 +232,7 @@ const tui: TuiPlugin = async (api) => {
         title: "Stop a same-session loop",
         category: "Scheduler",
         namespace: "palette",
+        slashName: "stop-loop",
         run: () => showLoops(api),
       },
       {
@@ -237,6 +240,7 @@ const tui: TuiPlugin = async (api) => {
         title: "Create standalone scheduled session",
         category: "Scheduler",
         namespace: "palette",
+        slashName: "schedule-standalone-session",
         run: () => showStandaloneSchedulesHelp(api),
       },
     ],
