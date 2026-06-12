@@ -360,21 +360,12 @@ works without one of these end-to-end checks.**
   `opencode.json`'s `plugin` array. Module must default-export a function (or
   `{ server }`). Named non-function exports break the loader — keep test
   helpers as properties on the default export, never as named exports.
-- `opencode-routines-tui` (`packages/tui/`) is a **TUI plugin**: loaded from
-  `tui.json`'s `plugin` array (NOT `opencode.json`). Module must
-  default-export `{ id, tui }`.
-- For **npm** TUI plugins, OpenCode resolves the entrypoint ONLY from
-  `package.json` `exports["./tui"]`. The `main`/`"."` export fallback applies
-  to server plugins only. Without `./tui`, install succeeds but the plugin is
-  silently skipped ("tui plugin has no entrypoint"). Keep both `"."` and
-  `"./tui"` in `packages/tui/package.json`.
 - Slash commands come from `api.keymap.registerLayer` command entries with a
   `slashName` field (plus optional `slashAliases`). The legacy
   `api.command.register` shim with `slash: { name }` also works but warns.
 - Same-session prompt injection must use `session.promptAsync` (NOT
   `session.prompt`, which streams a nested run and fails under Desktop):
   - Server plugin client (non-v2 SDK): `{ path: { id: sessionID }, body: { parts } }`
-  - TUI plugin client (v2 SDK): `{ sessionID, parts }`
 
 ## Managed command files (server plugin side effect)
 
@@ -391,38 +382,48 @@ files under `$XDG_CONFIG_HOME/opencode/commands/` (default
 - Tests and local runs MUST set `XDG_CONFIG_HOME` to a temp dir before
   importing/initializing the plugin, or you will write into the real user
   config (see `scripts/validate-routines-surface.mjs`).
-- These commands appear in BOTH terminal TUI and Desktop. Installing the
-  optional `opencode-routines-tui` plugin alongside them duplicates the slash
-  entries in the terminal TUI.
+- These commands appear in BOTH terminal TUI and Desktop.
 
-## 1. TUI slash-command test (tmux)
+## 1. Managed command slash test (tmux)
 
 Raw PTY scripting stalls (the TUI blocks on terminal capability queries), so
-use tmux as the terminal emulator:
+use tmux as the terminal emulator. Because the server plugin writes command
+files during init and OpenCode reads them at startup, a brand-new config dir
+needs TWO launches: one to install the files, a second to verify the slash
+list.
 
 ```bash
-# point a throwaway tui.json at the LOCAL package dir to test unpublished code
-cat > /tmp/routines-tui-test.json <<'JSON'
-{"$schema":"https://opencode.ai/tui.json","plugin":["/Users/<you>/code/opencode-routines/packages/tui"]}
-JSON
-# or test the published package: "plugin": ["opencode-routines-tui@X.Y.Z"]
+rm -rf /tmp/ocfg && mkdir -p /tmp/ocfg/opencode
 
+# first launch: plugin writes commands into /tmp/ocfg/opencode/commands
 tmux kill-session -t octui 2>/dev/null
 tmux new-session -d -s octui -x 160 -y 42 \
   "env -u OPENCODE_CLIENT -u OPENCODE_DISABLE_EMBEDDED_WEB_UI \
        -u OPENCODE_SERVER_USERNAME -u OPENCODE_SERVER_PASSWORD -u XDG_STATE_HOME \
-   OPENCODE_TUI_CONFIG=/tmp/routines-tui-test.json opencode /path/to/repo"
-sleep 18   # plugin npm install can take ~15-25s on first run
+       XDG_CONFIG_HOME=/tmp/ocfg OPENCODE_DISABLE_PROJECT_CONFIG=1 \
+       OPENCODE_CONFIG_CONTENT='{"plugin":["/Users/<you>/code/opencode-routines/dist/index.js"]}' \
+       opencode /path/to/repo"
+sleep 15
+ls /tmp/ocfg/opencode/commands
+tmux kill-session -t octui
+
+# second launch: slash list should now include the commands
+tmux new-session -d -s octui -x 160 -y 42 \
+  "env -u OPENCODE_CLIENT -u OPENCODE_DISABLE_EMBEDDED_WEB_UI \
+       -u OPENCODE_SERVER_USERNAME -u OPENCODE_SERVER_PASSWORD -u XDG_STATE_HOME \
+       XDG_CONFIG_HOME=/tmp/ocfg OPENCODE_DISABLE_PROJECT_CONFIG=1 \
+       OPENCODE_CONFIG_CONTENT='{"plugin":["/Users/<you>/code/opencode-routines/dist/index.js"]}' \
+       opencode /path/to/repo"
+sleep 14
 tmux send-keys -t octui "/loop"
 sleep 3
 tmux capture-pane -t octui -p | tail -45   # expect /loop /loops /stop-loop rows
 tmux kill-session -t octui
 ```
 
-Pass = the slash suggestion list shows the plugin's commands. "No matching
-items" = plugin not loaded (check the `./tui` export and `tui.json` path).
-The `env -u` strips are required when running from inside OpenCode Desktop
-(see opencode-mdm/AGENTS.md in the mdm repo).
+Pass = the slash suggestion list shows the managed commands. The `env -u`
+strips are required when running from inside OpenCode Desktop (see
+opencode-mdm/AGENTS.md in the mdm repo).
 
 ## 2. Server plugin test (headless serve + direct API)
 
@@ -462,11 +463,8 @@ same logs dir under `server.log` (plugin stderr).
 ## Release checklist
 
 1. `npm test && npm run typecheck` (root)
-2. `cd packages/tui && npm run build`
-3. tmux TUI test against the **local** `packages/tui` dir (section 1)
-4. Bump BOTH `package.json` versions in lockstep
-5. Commit/push, then `npm publish` root and `packages/tui` (needs OTP — only
-   Emilio publishes)
-6. Re-run the tmux test against the **published** version
-7. Update pins in the mdm repo: `opencode-mdm/opencode.json` (server plugin)
-   and `opencode-mdm/tui.json` (TUI plugin), run that repo's smoke tests, push
+2. tmux slash-command test with isolated `XDG_CONFIG_HOME` (section 1)
+3. Bump `package.json` version
+4. Commit/push, then `npm publish` root (needs OTP — only Emilio publishes)
+5. Confirm `npm view opencode-routines version` before bumping mdm
+6. Update pin in the mdm repo: `opencode-mdm/opencode.json`, run that repo's smoke tests, push
