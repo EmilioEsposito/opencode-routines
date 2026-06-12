@@ -182,20 +182,12 @@ For local development, point OpenCode at this repo's built files or source path.
 
 ## Publishing
 
-```bash
-npm test
-npm run typecheck
-npm version patch   # or minor / major
-git push
-git push --follow-tags
-```
+This package publishes through GitHub Actions trusted publishing from
+`.github/workflows/publish.yml`.
 
-The package publishes through GitHub Actions trusted publishing from `.github/workflows/publish.yml`.
-Pushing a `v*` tag triggers the workflow, which verifies the tag matches `package.json`
-and then runs `npm publish` with npm OIDC credentials.
+For maintainer release steps and verification, use:
 
-The package is public and unscoped. Use the normal `npm version` flow so the git tag
-and `package.json` version stay aligned.
+- `.claude/skills/publish-package/SKILL.md`
 
 ## Credits
 

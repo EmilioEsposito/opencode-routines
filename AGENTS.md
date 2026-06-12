@@ -462,9 +462,10 @@ same logs dir under `server.log` (plugin stderr).
 
 ## Release checklist
 
-1. `npm test && npm run typecheck` (root)
-2. tmux slash-command test with isolated `XDG_CONFIG_HOME` (section 1)
-3. Bump `package.json` version
-4. Commit/push, then `npm publish` root (needs OTP — only Emilio publishes)
-5. Confirm `npm view opencode-routines version` before bumping mdm
-6. Update pin in the mdm repo: `opencode-mdm/opencode.json`, run that repo's smoke tests, push
+Use `.claude/skills/publish-package/SKILL.md` for the trusted publishing flow.
+
+Repo-specific follow-up after a successful publish:
+
+1. Confirm `npm view opencode-routines version`
+2. Update the pin in the parent mdm repo: `opencode-mdm/opencode.json`
+3. Run the mdm repo smoke tests before pushing that follow-up change
