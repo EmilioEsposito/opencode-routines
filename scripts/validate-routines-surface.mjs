@@ -9,7 +9,6 @@ const configRoot = mkdtempSync(join(tmpdir(), "routines-validate-"))
 process.env.XDG_CONFIG_HOME = configRoot
 
 const { default: RoutinesPlugin } = await import("../dist/index.js")
-const { default: tuiPlugin } = await import("../dist/tui.js")
 
 const { __test } = RoutinesPlugin
 
@@ -92,7 +91,5 @@ for (const name of [
   assert.ok(server.tool[name], `${name} alias should be registered`)
 }
 
-assert.equal(typeof tuiPlugin.tui, "function")
-assert.equal(tuiPlugin.id, "opencode-routines-tui")
 
 console.log("routines surface validation passed")
