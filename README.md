@@ -32,7 +32,7 @@ Add the server plugin to your OpenCode config (`~/.config/opencode/opencode.json
 }
 ```
 
-OpenCode installs the package from npm on next start. Use `@latest` if you want new versions on restart, or pin a version such as `"opencode-routines@0.1.1"`.
+OpenCode installs the package from npm on next start. Use `@latest` if you want new versions on restart, or pin a version such as `"opencode-routines@0.1.9"`.
 
 That single entry is the whole packaged experience: on load, the server plugin also installs slash commands (`/loop`, `/loops`, `/stop-loop`, `/schedule-standalone-session`) as managed OpenCode custom command files under `~/.config/opencode/commands/`. These work in **both** the terminal TUI and OpenCode Desktop. The install is idempotent and marker-guarded: only files containing the `managed-by: opencode-routines` marker are ever created or updated, so a user-edited `loop.md` (marker removed) is never touched. Restart OpenCode once after the first install for the commands to appear. Opt out with plugin options:
 
